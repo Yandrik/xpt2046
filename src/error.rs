@@ -5,9 +5,9 @@ use defmt::{write, Format, Formatter};
 
 #[cfg_attr(feature = "with_defmt", derive(Format))]
 #[derive(Debug)]
-pub enum BusError<SPIError, CSError> {
+pub enum BusError<SPIError, PinError> {
     Spi(SPIError),
-    Pin(CSError),
+    Pin(PinError),
 }
 
 #[cfg_attr(feature = "with_defmt", derive(Format))]
