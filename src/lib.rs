@@ -432,11 +432,12 @@ where
     pub fn run(&mut self) -> Result<(), Error<BusError<SPIError, PinError>>> {
         match self.screen_state {
             TouchScreenState::IDLE => {
-                if self.operation_mode == TouchScreenOperationMode::CALIBRATION
-                    && self
-                        .irq
-                        .is_low()
-                        .map_err(|e| Error::Bus(BusError::Pin(e)))?
+                if
+                // self.operation_mode == TouchScreenOperationMode::CALIBRATION &&  // if irq is low, go to presampling state
+                self
+                    .irq
+                    .is_low()
+                    .map_err(|e| Error::Bus(BusError::Pin(e)))?
                 {
                     self.screen_state = TouchScreenState::PRESAMPLING;
                 }
