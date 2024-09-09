@@ -178,7 +178,7 @@ impl TouchSamples {
         let mut x = 0;
         let mut y = 0;
 
-        for point in self.samples[..self.num_samples] {
+        for point in &self.samples[..self.num_samples] {
             x += point.x;
             y += point.y;
         }
@@ -190,7 +190,7 @@ impl TouchSamples {
     pub fn add_sample(&mut self, point: Point) {
         self.samples[self.counter] = point;
         self.counter = (self.counter + 1) % self.num_samples;
-        self.active_samples == min(self.active_samples + 1, self.num_samples - 1);
+        self.active_samples = min(self.active_samples + 1, self.num_samples - 1);
     }
     pub fn is_full(&self) -> bool { self.active_samples == self.num_samples - 1 }
 
