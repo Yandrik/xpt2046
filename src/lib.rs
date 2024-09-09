@@ -35,7 +35,7 @@ use embedded_graphics_core::{
 
 #[cfg(feature = "with_defmt")]
 use defmt::Format;
-use embedded_hal::delay::DelayUs;
+use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::InputPin;
 use embedded_hal::spi::SpiDevice;
 
@@ -284,7 +284,7 @@ where
     }
 
     /// Reset the driver and preload tx buffer with register data.
-    pub fn init<D: DelayUs>(
+    pub fn init<D: DelayNs>(
         &mut self,
         delay: &mut D,
     ) -> Result<(), Error<BusError<SPIError, ()>>> {
@@ -316,7 +316,7 @@ where
     ) -> Result<(), Error<BusError<SPIError, PinErr>>>
     where
         DT: DrawTarget<Color = Rgb565>,
-        DELAY: DelayUs,
+        DELAY: DelayNs,
         F: FnMut(&mut Self) -> Result<(), Error<BusError<SPIError, PinErr>>>,
     {
         let mut calibration_count = 0;
@@ -484,7 +484,7 @@ where
     ) -> Result<(), Error<BusError<SPIError, PinError>>>
     where
         DT: DrawTarget<Color = Rgb565>,
-        DELAY: DelayUs,
+        DELAY: DelayNs,
     {
         self._calibration_impl(dt, delay, |s| s.run())
     }
@@ -582,7 +582,7 @@ where
     ) -> Result<(), Error<BusError<SPIError, Infallible>>>
     where
         DT: DrawTarget<Color = Rgb565>,
-        DELAY: DelayUs,
+        DELAY: DelayNs,
     {
         self._calibration_impl(dt, delay, |s| s.run_with_exti(exti))
     }
