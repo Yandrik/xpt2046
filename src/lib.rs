@@ -26,6 +26,7 @@ pub use crate::{
     exti_pin::Xpt2046Exti,
 };
 use core::{fmt::Debug, ops::RemAssign};
+use core::cmp::min;
 use core::convert::Infallible;
 use embedded_graphics_core::{
     draw_target::DrawTarget,
@@ -130,7 +131,7 @@ impl Orientation {
 }
 
 /// Current state of the driver
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub enum TouchScreenState {
     /// Driver waith for touch
     IDLE,
@@ -154,8 +155,11 @@ pub enum TouchScreenOperationMode {
 pub struct TouchSamples {
     /// All the touch samples
     samples: [Point; MAX_SAMPLES],
+    num_samples: usize,
     /// current number of captured samples
     counter: usize,
+    /// number of "active" samples in the buffer. 0 if not yet touched, 16 if 16 samples were added.
+    active_samples: usize,
 }
 
 impl Default for TouchSamples {
@@ -163,6 +167,8 @@ impl Default for TouchSamples {
         Self {
             counter: 0,
             samples: [Point::default(); MAX_SAMPLES],
+            num_samples: MAX_SAMPLES,
+            active_samples: 0,
         }
     }
 }
@@ -172,14 +178,25 @@ impl TouchSamples {
         let mut x = 0;
         let mut y = 0;
 
-        for point in self.samples {
+        for point in self.samples[..self.num_samples] {
             x += point.x;
             y += point.y;
         }
-        x /= MAX_SAMPLES as i32;
-        y /= MAX_SAMPLES as i32;
+        x /= self.num_samples as i32;
+        y /= self.num_samples as i32;
         Point::new(x, y)
     }
+
+    pub fn add_sample(&mut self, point: Point) {
+        self.samples[self.counter] = point;
+        self.counter = (self.counter + 1) % self.num_samples;
+        self.active_samples == min(self.active_samples + 1, self.num_samples - 1);
+    }
+    pub fn is_full(&self) -> bool { self.active_samples == self.num_samples - 1 }
+
+    pub fn is_empty(&self) -> bool { self.active_samples == 0 }
+
+    pub fn decr_active_samples(&mut self) { self.active_samples = self.active_samples.saturating_sub(1) }
 }
 
 #[derive(Debug)]
@@ -220,11 +237,26 @@ where
             calibration_point: orientation.calibration_point(),
         }
     }
+
+    /// Set the number of samples that will be used to debounce and compute the touch point.
+    /// Max: `MAX_SAMPLES` (128)
+    ///
+    /// # Panics
+    ///
+    /// Panics if num_samples is larger than MAX_SAMPLES, or smaller than 1
+    pub fn set_num_samples(&mut self, num_samples: usize) {
+        if num_samples > MAX_SAMPLES {
+            panic!("cannot have more samples than MAX_SAMPLES (128)")
+        } else if num_samples < 1 {
+            panic!("cannot have less samples than 1")
+        }
+        self.ts.num_samples = num_samples;
+    }
 }
 
 impl<SPI, PinIRQ, SPIError> Xpt2046<SPI, PinIRQ>
 where
-    SPI: SpiDevice<Error = SPIError>,
+    SPI: SpiDevice<Error=SPIError>,
     SPIError: Debug,
 {
     fn spi_read<PinErr>(&mut self) -> Result<(), Error<BusError<SPIError, PinErr>>> {
@@ -278,6 +310,8 @@ where
         self.screen_state == TouchScreenState::TOUCHED
     }
 
+    pub fn get_state(&self) -> TouchScreenState { self.screen_state }
+
     /// Sometimes the TOUCHED state needs to be cleared
     pub fn clear_touch(&mut self) {
         self.screen_state = TouchScreenState::PRESAMPLING;
@@ -315,7 +349,7 @@ where
         mut run: F,
     ) -> Result<(), Error<BusError<SPIError, PinErr>>>
     where
-        DT: DrawTarget<Color = Rgb565>,
+        DT: DrawTarget<Color=Rgb565>,
         DELAY: DelayNs,
         F: FnMut(&mut Self) -> Result<(), Error<BusError<SPIError, PinErr>>>,
     {
@@ -406,8 +440,8 @@ where
 
 impl<SPI, PinIRQ, SPIError, PinError> Xpt2046<SPI, PinIRQ>
 where
-    SPI: SpiDevice<u8, Error = SPIError>,
-    PinIRQ: InputPin<Error = PinError>,
+    SPI: SpiDevice<u8, Error=SPIError>,
+    PinIRQ: InputPin<Error=PinError>,
     SPIError: Debug,
     PinError: Debug,
 {
@@ -433,40 +467,34 @@ where
                     .is_high()
                     .map_err(|e| Error::Bus(BusError::Pin(e)))?
                 {
-                    self.screen_state = TouchScreenState::RELEASED
+                    self.ts.decr_active_samples();
+                    if self.ts.is_empty() {
+                        self.screen_state = TouchScreenState::RELEASED
+                    }
                 }
                 let point_sample = self.read_touch_point()?;
-                self.ts.samples[self.ts.counter] = point_sample;
-                self.ts.counter += 1;
-                if self.ts.counter + 1 == MAX_SAMPLES {
-                    self.ts.counter = 0;
-                    self.screen_state = TouchScreenState::TOUCHED;
+                self.ts.add_sample(point_sample);
+                if self.ts.is_full() {
+                    self.screen_state = TouchScreenState::TOUCHED
                 }
             }
             TouchScreenState::TOUCHED => {
-                let point_sample = self.read_touch_point()?;
-                self.ts.samples[self.ts.counter] = point_sample;
-                self.ts.counter += 1;
-                /*
-                 * Wrap around the counter if the screen
-                 * is touched for longer time
-                 */
-                self.ts.counter.rem_assign(MAX_SAMPLES - 1);
                 if self
                     .irq
                     .is_high()
                     .map_err(|e| Error::Bus(BusError::Pin(e)))?
                 {
-                    self.screen_state = TouchScreenState::RELEASED
+                    self.ts.decr_active_samples();
+                    if self.ts.is_empty() {
+                        self.screen_state = TouchScreenState::RELEASED;
+                    }
+                } else {
+                    let point_sample = self.read_touch_point()?;
+                    self.ts.add_sample(point_sample);
                 }
             }
             TouchScreenState::RELEASED => {
                 self.screen_state = TouchScreenState::IDLE;
-                self.ts.counter = 0;
-                /*
-                 * The PENIRQ should be re-enabled in here
-                 * as we finished sending any data to the touch controller
-                 */
             }
         }
         Ok(())
@@ -483,7 +511,7 @@ where
         delay: &mut DELAY,
     ) -> Result<(), Error<BusError<SPIError, PinError>>>
     where
-        DT: DrawTarget<Color = Rgb565>,
+        DT: DrawTarget<Color=Rgb565>,
         DELAY: DelayNs,
     {
         self._calibration_impl(dt, delay, |s| s.run())
@@ -494,7 +522,7 @@ where
 
 impl<SPI, PinIRQ, SPIError> Xpt2046<SPI, PinIRQ>
 where
-    SPI: SpiDevice<u8, Error = SPIError>,
+    SPI: SpiDevice<u8, Error=SPIError>,
     PinIRQ: Xpt2046Exti,
     SPIError: Debug,
 {
@@ -581,7 +609,7 @@ where
         exti: &mut PinIRQ::Exti,
     ) -> Result<(), Error<BusError<SPIError, Infallible>>>
     where
-        DT: DrawTarget<Color = Rgb565>,
+        DT: DrawTarget<Color=Rgb565>,
         DELAY: DelayNs,
     {
         self._calibration_impl(dt, delay, |s| s.run_with_exti(exti))
