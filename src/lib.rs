@@ -130,6 +130,43 @@ impl Orientation {
     }
 }
 
+/// Invert coordinates.
+#[derive(Debug)]
+pub struct Inverted {
+    x: bool,
+    y: bool,
+}
+
+impl Inverted {
+    pub fn invert_x() -> Inverted {
+        Inverted { x: true, y: false }
+    }
+
+    pub fn invert_y() -> Inverted {
+        Inverted { x: false, y: true }
+    }
+
+    pub fn invert_none() -> Inverted {
+        Inverted { x: false, y: false }
+    }
+
+    pub fn invert_all() -> Inverted {
+        Inverted { x: true, y: true }
+    }
+
+    pub fn compute(&self, touch: Point, height: i32, width: i32) -> Point {
+        let x = if !self.x { touch.x } else { width - touch.x };
+        let y = if !self.y { touch.y } else { height - touch.y };
+        Point::new(x, y)
+    }
+}
+
+impl Default for Inverted {
+    fn default() -> Self {
+        Inverted { x: false, y: false }
+    }
+}
+
 /// Current state of the driver
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum TouchScreenState {
@@ -213,7 +250,8 @@ pub struct Xpt2046<SPI, PinIRQ> {
     screen_state: TouchScreenState,
     /// Buffer for the touch data samples
     ts: TouchSamples,
-    calibration_data: CalibrationData,
+    inverted: Inverted,
+    pub calibration_data: CalibrationData,
     operation_mode: TouchScreenOperationMode,
     /// Location of the touch points used for
     /// performing manual calibration
@@ -231,7 +269,8 @@ where
             tx_buff: [0; TX_BUFF_LEN],
             rx_buff: [0; TX_BUFF_LEN],
             screen_state: TouchScreenState::IDLE,
-            ts: TouchSamples::default(),
+            ts: Default::default(),
+            inverted: Default::default(),
             calibration_data: orientation.calibration_data(),
             operation_mode: TouchScreenOperationMode::NORMAL,
             calibration_point: orientation.calibration_point(),
@@ -251,6 +290,11 @@ where
             panic!("cannot have less samples than 1")
         }
         self.ts.num_samples = num_samples;
+    }
+
+    /// Set the inverted setting (which coordinates to invert). See ![Inverted] for more info
+    pub fn set_inverted(&mut self, inverted: Inverted) {
+        self.inverted = inverted;
     }
 }
 
